@@ -1,10 +1,44 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import yfinance as yf
-from tensorflow.keras.models import load_model # <-- Perubahan di sini
+import requests  # <-- Impor library baru
+from datetime import datetime  # <-- Impor library baru
+from tensorflow.keras.models import load_model
 import joblib
 import plotly.graph_objects as go
+
+# --- Fungsi baru untuk mengambil data dari CoinGecko ---
+def get_coingecko_data(coin_id='bitcoin', vs_currency='usd', days='1825', interval='daily'):
+    """Mengambil data historis dari CoinGecko API dan mengembalikannya sebagai DataFrame."""
+    try:
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+        params = {
+            'vs_currency': vs_currency,
+            'days': days,
+            'interval': interval
+        }
+        response = requests.get(url, params=params)
+        response.raise_for_status()  # Ini akan menampilkan error jika request gagal (misal: 404, 500)
+        
+        data = response.json()['prices']
+        
+        if not data:
+            st.warning("API CoinGecko tidak mengembalikan data.")
+            return pd.DataFrame()
+        
+        # Konversi data ke format DataFrame yang sesuai
+        df = pd.DataFrame(data, columns=['Timestamp', 'Close'])
+        df['Date'] = pd.to_datetime(df['Timestamp'], unit='ms')
+        df.set_index('Date', inplace=True)
+        
+        # Hanya gunakan kolom 'Close' agar formatnya mirip dengan yfinance
+        return df[['Close']]
+    except requests.exceptions.RequestException as e:
+        st.error(f"Gagal terhubung ke API CoinGecko: {e}")
+        return None
+    except Exception as e:
+        st.error(f"Terjadi error saat memproses data dari CoinGecko: {e}")
+        return None
 
 # Memuat model dan scaler
 try:
@@ -17,14 +51,11 @@ except Exception as e:
 # Judul Aplikasi
 st.title("Prediksi Harga Bitcoin (BTC)")
 
-# Mengambil data historis Bitcoin dari Yahoo Finance
-try:
-    btc_data = yf.download(tickers='BTC-USD', period='5y', interval='1d')
-    if btc_data.empty:
-        st.warning("Tidak ada data yang diambil dari Yahoo Finance.")
-        st.stop()
-except Exception as e:
-    st.error(f"Gagal mengambil data dari yfinance: {e}")
+# --- Mengganti blok yfinance dengan fungsi CoinGecko ---
+btc_data = get_coingecko_data(days='1825') # 1825 hari = 5 tahun
+
+if btc_data is None or btc_data.empty:
+    st.warning("Gagal mengambil data harga Bitcoin. Aplikasi tidak dapat melanjutkan.")
     st.stop()
 
 # Menampilkan data mentah
