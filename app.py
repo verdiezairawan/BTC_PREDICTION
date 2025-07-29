@@ -18,13 +18,7 @@ def get_alphavantage_data(symbol, market, api_key):
             st.warning("API Alpha Vantage tidak mengembalikan data. Pastikan API key valid.")
             return pd.DataFrame()
         
-        # --- KODE DEBUG: Tampilkan nama kolom mentah ---
-        st.subheader("Debug: Data Mentah dari Alpha Vantage")
-        st.write("Kolom yang tersedia:")
-        st.write(data.columns) # Ini akan menampilkan semua nama kolom yang ada
-        st.write("5 baris data pertama:")
-        st.dataframe(data.head())
-        # --- AKHIR KODE DEBUG ---
+       
 
         # Format ulang DataFrame agar sesuai dengan kebutuhan model
         # GANTI 'NAMA_KOLOM_YANG_BENAR' di bawah ini sesuai hasil debug
