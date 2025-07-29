@@ -7,7 +7,7 @@ import joblib
 import plotly.graph_objects as go
 
 # --- Fungsi baru untuk mengambil data dari Alpha Vantage ---
-@st.cache_data(ttl=3600) # Menambah cache agar tidak mengambil data setiap kali reload
+@st.cache_data(ttl=3600)
 def get_alphavantage_data(symbol, market, api_key):
     """Mengambil data historis dari Alpha Vantage API dan mengembalikannya sebagai DataFrame."""
     try:
@@ -17,17 +17,24 @@ def get_alphavantage_data(symbol, market, api_key):
         if data is None or data.empty:
             st.warning("API Alpha Vantage tidak mengembalikan data. Pastikan API key valid.")
             return pd.DataFrame()
-            
+        
+        # --- KODE DEBUG: Tampilkan nama kolom mentah ---
+        st.subheader("Debug: Data Mentah dari Alpha Vantage")
+        st.write("Kolom yang tersedia:")
+        st.write(data.columns) # Ini akan menampilkan semua nama kolom yang ada
+        st.write("5 baris data pertama:")
+        st.dataframe(data.head())
+        # --- AKHIR KODE DEBUG ---
+
         # Format ulang DataFrame agar sesuai dengan kebutuhan model
+        # GANTI 'NAMA_KOLOM_YANG_BENAR' di bawah ini sesuai hasil debug
         data.rename(columns={
-            '4b. close (USD)': 'Close'
+            '4a. close (USD)': 'Close'  # <--- KEMUNGKINAN BESAR INI YANG PERLU DIGANTI
         }, inplace=True)
         
-        # Mengubah index menjadi datetime dan mengurutkannya
         data.index = pd.to_datetime(data.index)
         data = data.sort_index(ascending=True)
         
-        # Hanya ambil data 'Close' yang dibutuhkan
         return data[['Close']]
         
     except Exception as e:
