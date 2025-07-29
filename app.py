@@ -1,46 +1,45 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import requests  # <-- Impor library baru
-from datetime import datetime  # <-- Impor library baru
+from alpha_vantage.cryptocurrencies import CryptoCurrencies
 from tensorflow.keras.models import load_model
 import joblib
 import plotly.graph_objects as go
 
-# --- Fungsi baru untuk mengambil data dari CoinGecko ---
-def get_coingecko_data(coin_id='bitcoin', vs_currency='usd', days='1825', interval='daily'):
-    """Mengambil data historis dari CoinGecko API dan mengembalikannya sebagai DataFrame."""
+# --- Fungsi baru untuk mengambil data dari Alpha Vantage ---
+@st.cache_data(ttl=3600) # Menambah cache agar tidak mengambil data setiap kali reload
+def get_alphavantage_data(symbol, market, api_key):
+    """Mengambil data historis dari Alpha Vantage API dan mengembalikannya sebagai DataFrame."""
     try:
-        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
-        params = {
-            'vs_currency': vs_currency,
-            'days': days,
-            'interval': interval
-        }
-        response = requests.get(url, params=params)
-        response.raise_for_status()  # Ini akan menampilkan error jika request gagal (misal: 404, 500)
+        cc = CryptoCurrencies(key=api_key, output_format='pandas')
+        data, _ = cc.get_digital_currency_daily(symbol=symbol, market=market)
         
-        data = response.json()['prices']
-        
-        if not data:
-            st.warning("API CoinGecko tidak mengembalikan data.")
+        if data is None or data.empty:
+            st.warning("API Alpha Vantage tidak mengembalikan data. Pastikan API key valid.")
             return pd.DataFrame()
+            
+        # Format ulang DataFrame agar sesuai dengan kebutuhan model
+        data.rename(columns={
+            '4b. close (USD)': 'Close'
+        }, inplace=True)
         
-        # Konversi data ke format DataFrame yang sesuai
-        df = pd.DataFrame(data, columns=['Timestamp', 'Close'])
-        df['Date'] = pd.to_datetime(df['Timestamp'], unit='ms')
-        df.set_index('Date', inplace=True)
+        # Mengubah index menjadi datetime dan mengurutkannya
+        data.index = pd.to_datetime(data.index)
+        data = data.sort_index(ascending=True)
         
-        # Hanya gunakan kolom 'Close' agar formatnya mirip dengan yfinance
-        return df[['Close']]
-    except requests.exceptions.RequestException as e:
-        st.error(f"Gagal terhubung ke API CoinGecko: {e}")
-        return None
+        # Hanya ambil data 'Close' yang dibutuhkan
+        return data[['Close']]
+        
     except Exception as e:
-        st.error(f"Terjadi error saat memproses data dari CoinGecko: {e}")
+        st.error(f"Gagal mengambil atau memproses data dari Alpha Vantage. Error: {e}")
+        st.error("Pastikan API key Anda sudah benar dan ditambahkan di Secrets Streamlit.")
         return None
 
-# Memuat model dan scaler
+# --- Konfigurasi Awal dan Judul ---
+st.set_page_config(page_title="Prediksi Harga Bitcoin", layout="wide")
+st.title("Prediksi Harga Bitcoin (BTC)")
+
+# --- Memuat model dan scaler ---
 try:
     model = load_model('model_tcn_bilstm_gru.h5')
     scaler = joblib.load('scaler_btc.save')
@@ -48,27 +47,34 @@ except Exception as e:
     st.error(f"Gagal memuat model atau scaler: {e}")
     st.stop()
 
-# Judul Aplikasi
-st.title("Prediksi Harga Bitcoin (BTC)")
-
-# --- Mengganti blok yfinance dengan fungsi CoinGecko ---
-btc_data = get_coingecko_data(days='1825') # 1825 hari = 5 tahun
+# --- Mengambil API Key dari Streamlit Secrets ---
+# Pastikan kamu sudah menambahkan ini di pengaturan aplikasi Streamlit!
+try:
+    alpha_vantage_api_key = st.secrets["ALPHA_VANTAGE_API_KEY"]
+except KeyError:
+    st.error("API Key Alpha Vantage tidak ditemukan. Silakan tambahkan di 'Settings > Secrets' pada aplikasi Streamlit Anda.")
+    st.stop()
+    
+# --- Mengambil dan menampilkan data ---
+btc_data = get_alphavantage_data(symbol='BTC', market='USD', api_key=alpha_vantage_api_key)
 
 if btc_data is None or btc_data.empty:
-    st.warning("Gagal mengambil data harga Bitcoin. Aplikasi tidak dapat melanjutkan.")
+    st.warning("Aplikasi tidak dapat melanjutkan karena gagal mengambil data.")
     st.stop()
 
-# Menampilkan data mentah
-st.subheader("Data Historis Harga Penutupan Bitcoin (5 Tahun Terakhir)")
+st.subheader("Data Historis Harga Penutupan Bitcoin")
 st.write(btc_data.tail())
 
-# Mempersiapkan data untuk prediksi
+# --- Pra-pemrosesan dan Prediksi (kode ini tetap sama) ---
 try:
     close_prices = btc_data['Close'].values.reshape(-1, 1)
     scaled_close_prices = scaler.transform(close_prices)
 
     X_test = []
-    y_test = close_prices[60:, 0]
+    # Mengambil data aktual yang sesuai dengan jumlah prediksi
+    y_test_start_index = len(btc_data) - len(scaled_close_prices[60:])
+    y_test = close_prices[y_test_start_index:, 0]
+    
     for i in range(60, len(scaled_close_prices)):
         X_test.append(scaled_close_prices[i-60:i, 0])
 
@@ -77,8 +83,8 @@ try:
 except Exception as e:
     st.error(f"Gagal dalam pra-pemrosesan data: {e}")
     st.stop()
-
-# Melakukan prediksi
+    
+# ... (sisa kode prediksi dan plot sama persis)
 try:
     predictions = model.predict(X_test)
     predictions = scaler.inverse_transform(predictions)
@@ -89,18 +95,22 @@ except Exception as e:
 # Menampilkan hasil prediksi
 st.subheader('Prediksi vs Harga Aktual')
 
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=btc_data.index[60:], y=y_test, mode='lines', name='Harga Aktual', line=dict(color='blue')))
-fig.add_trace(go.Scatter(x=btc_data.index[60:], y=predictions.flatten(), mode='lines', name='Harga Prediksi', line=dict(color='red')))
+# Pastikan panjang data untuk plot sama
+actual_dates = btc_data.index[y_test_start_index:]
+if len(actual_dates) != len(predictions):
+    st.warning("Terjadi ketidakcocokan panjang data antara prediksi dan data aktual.")
+else:
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=actual_dates, y=y_test, mode='lines', name='Harga Aktual', line=dict(color='blue')))
+    fig.add_trace(go.Scatter(x=actual_dates, y=predictions.flatten(), mode='lines', name='Harga Prediksi', line=dict(color='red')))
 
-fig.update_layout(
-    title='Perbandingan Harga Aktual dan Prediksi Bitcoin',
-    xaxis_title='Tanggal',
-    yaxis_title='Harga (USD)',
-    legend_title='Keterangan'
-)
-
-st.plotly_chart(fig)
+    fig.update_layout(
+        title='Perbandingan Harga Aktual dan Prediksi Bitcoin',
+        xaxis_title='Tanggal',
+        yaxis_title='Harga (USD)',
+        legend_title='Keterangan'
+    )
+    st.plotly_chart(fig)
 
 # Prediksi untuk hari berikutnya
 try:
