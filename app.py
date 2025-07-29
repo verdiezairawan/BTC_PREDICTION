@@ -20,7 +20,7 @@ def get_alphavantage_data(symbol, market, api_key):
             
         # Format ulang DataFrame agar sesuai dengan kebutuhan model
         data.rename(columns={
-            '4a. close (USD)': 'Close'  # <-- Ini baris kunci yang memperbaiki error
+            '4a. close (USD)': 'Close'
         }, inplace=True)
         
         # Mengubah index menjadi datetime dan mengurutkannya
