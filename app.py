@@ -1,67 +1,84 @@
 import streamlit as st
-import yfinance as yf
-import pandas as pd
 import numpy as np
+import pandas as pd
+import yfinance as yf
+from keras.models import load_model
 import joblib
-from tensorflow.keras.models import load_model
-from tcn import TCN
-from sklearn.preprocessing import MinMaxScaler
+import plotly.graph_objects as go
 
-# -----------------------------
-# CONFIGURASI DASAR APLIKASI
-# -----------------------------
-st.set_page_config(page_title="Prediksi Harga Bitcoin", layout="wide")
-st.title("📊 Prediksi Harga Bitcoin Otomatis (TCN–BiLSTM–GRU)")
+# Memuat model dan scaler
+try:
+    model = load_model('model_tcn_bilstm_gru.h5')
+    scaler = joblib.load('scaler_btc.save')
+except Exception as e:
+    st.error(f"Gagal memuat model atau scaler: {e}")
+    st.stop()
 
-# -----------------------------
-# LOAD MODEL & SCALER
-# -----------------------------
-@st.cache_resource
-def load_prediction_model():
-    model = load_model("model_finetuned_btc_2025.h5",compile=False, custom_objects={"TCN": TCN})
-    scaler = joblib.load("scaler_finetuned.save")
-    return model, scaler
+# Judul Aplikasi
+st.title("Prediksi Harga Bitcoin (BTC)")
 
-model, scaler = load_prediction_model()
+# Mengambil data historis Bitcoin dari Yahoo Finance
+try:
+    btc_data = yf.download(tickers='BTC-USD', period='5y', interval='1d')
+    if btc_data.empty:
+        st.warning("Tidak ada data yang diambil dari Yahoo Finance.")
+        st.stop()
+except Exception as e:
+    st.error(f"Gagal mengambil data dari yfinance: {e}")
+    st.stop()
 
-model, scaler = load_prediction_model()
+# Menampilkan data mentah
+st.subheader("Data Historis Harga Penutupan Bitcoin (5 Tahun Terakhir)")
+st.write(btc_data.tail())
 
-# DEBUG SCALER
-print("Min:", scaler.data_min_)
-print("Max:", scaler.data_max_)
+# Mempersiapkan data untuk prediksi
+try:
+    close_prices = btc_data['Close'].values.reshape(-1, 1)
+    scaled_close_prices = scaler.transform(close_prices)
 
+    X_test = []
+    y_test = close_prices[60:, 0]
+    for i in range(60, len(scaled_close_prices)):
+        X_test.append(scaled_close_prices[i-60:i, 0])
 
-# -----------------------------
-# AMBIL DATA TERBARU DARI YFINANCE
-# -----------------------------
-@st.cache_data
-def fetch_btc_data(window_size=60):
-    df = yf.download("BTC-USD", period="90d", interval="1d")
-    df = df[["Close"]].dropna()
-    return df.tail(window_size)
+    X_test = np.array(X_test)
+    X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
+except Exception as e:
+    st.error(f"Gagal dalam pra-pemrosesan data: {e}")
+    st.stop()
 
-df = fetch_btc_data()
+# Melakukan prediksi
+try:
+    predictions = model.predict(X_test)
+    predictions = scaler.inverse_transform(predictions)
+except Exception as e:
+    st.error(f"Gagal melakukan prediksi: {e}")
+    st.stop()
 
-# -----------------------------
-# PREPROCESS DAN PREDIKSI
-# -----------------------------
-def prepare_input(df, window_size=60):
-    scaled_data = scaler.transform(df[['Close']])
-    X = [scaled_data[-window_size:]]
-    return np.array(X)
+# Menampilkan hasil prediksi
+st.subheader('Prediksi vs Harga Aktual')
 
-X_input = prepare_input(df)
-pred_scaled = model.predict(X_input)
-predicted_price = scaler.inverse_transform(pred_scaled)[0][0]
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=btc_data.index[60:], y=y_test, mode='lines', name='Harga Aktual', line=dict(color='blue')))
+fig.add_trace(go.Scatter(x=btc_data.index[60:], y=predictions.flatten(), mode='lines', name='Harga Prediksi', line=dict(color='red')))
 
-# -----------------------------
-# TAMPILAN UI
-# -----------------------------
-st.subheader("📅 Tabel Harga Bitcoin Terbaru")
-st.dataframe(df.tail(10), use_container_width=True)
+fig.update_layout(
+    title='Perbandingan Harga Aktual dan Prediksi Bitcoin',
+    xaxis_title='Tanggal',
+    yaxis_title='Harga (USD)',
+    legend_title='Keterangan'
+)
 
-st.subheader("🔮 Hasil Prediksi Harga Berikutnya")
-st.metric("Harga Prediksi (USD)", f"${predicted_price:,.2f}")
+st.plotly_chart(fig)
 
-print("Predicted scaled shape:", pred_scaled.shape)
-print("Predicted scaled value:", pred_scaled)
+# Prediksi untuk hari berikutnya
+try:
+    last_60_days = scaled_close_prices[-60:]
+    last_60_days = np.reshape(last_60_days, (1, 60, 1))
+    next_day_prediction_scaled = model.predict(last_60_days)
+    next_day_prediction = scaler.inverse_transform(next_day_prediction_scaled)
+
+    st.subheader('Prediksi Harga untuk Besok')
+    st.write(f"Prediksi harga penutupan Bitcoin untuk hari berikutnya adalah: **${next_day_prediction[0][0]:.2f}**")
+except Exception as e:
+    st.error(f"Gagal memprediksi harga untuk hari berikutnya: {e}")
