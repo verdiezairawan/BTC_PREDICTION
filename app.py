@@ -6,7 +6,7 @@ from tensorflow.keras.models import load_model
 import joblib
 import plotly.graph_objects as go
 
-# --- Fungsi baru untuk mengambil data dari Alpha Vantage ---
+# --- Fungsi untuk mengambil data dari Alpha Vantage ---
 @st.cache_data(ttl=3600)
 def get_alphavantage_data(symbol, market, api_key):
     """Mengambil data historis dari Alpha Vantage API dan mengembalikannya sebagai DataFrame."""
@@ -17,18 +17,17 @@ def get_alphavantage_data(symbol, market, api_key):
         if data is None or data.empty:
             st.warning("API Alpha Vantage tidak mengembalikan data. Pastikan API key valid.")
             return pd.DataFrame()
-        
-       
-
+            
         # Format ulang DataFrame agar sesuai dengan kebutuhan model
-        # GANTI 'NAMA_KOLOM_YANG_BENAR' di bawah ini sesuai hasil debug
         data.rename(columns={
-            '4a. close (USD)': 'Close'  # <--- KEMUNGKINAN BESAR INI YANG PERLU DIGANTI
+            '4a. close (USD)': 'Close'  # <-- Ini baris kunci yang memperbaiki error
         }, inplace=True)
         
+        # Mengubah index menjadi datetime dan mengurutkannya
         data.index = pd.to_datetime(data.index)
         data = data.sort_index(ascending=True)
         
+        # Hanya ambil data 'Close' yang dibutuhkan
         return data[['Close']]
         
     except Exception as e:
@@ -49,7 +48,6 @@ except Exception as e:
     st.stop()
 
 # --- Mengambil API Key dari Streamlit Secrets ---
-# Pastikan kamu sudah menambahkan ini di pengaturan aplikasi Streamlit!
 try:
     alpha_vantage_api_key = st.secrets["ALPHA_VANTAGE_API_KEY"]
 except KeyError:
@@ -66,14 +64,13 @@ if btc_data is None or btc_data.empty:
 st.subheader("Data Historis Harga Penutupan Bitcoin")
 st.write(btc_data.tail())
 
-# --- Pra-pemrosesan dan Prediksi (kode ini tetap sama) ---
+# --- Pra-pemrosesan dan Prediksi ---
 try:
     close_prices = btc_data['Close'].values.reshape(-1, 1)
     scaled_close_prices = scaler.transform(close_prices)
 
     X_test = []
-    # Mengambil data aktual yang sesuai dengan jumlah prediksi
-    y_test_start_index = len(btc_data) - len(scaled_close_prices[60:])
+    y_test_start_index = len(scaled_close_prices) - (len(scaled_close_prices) - 60)
     y_test = close_prices[y_test_start_index:, 0]
     
     for i in range(60, len(scaled_close_prices)):
@@ -85,7 +82,7 @@ except Exception as e:
     st.error(f"Gagal dalam pra-pemrosesan data: {e}")
     st.stop()
     
-# ... (sisa kode prediksi dan plot sama persis)
+# Melakukan prediksi
 try:
     predictions = model.predict(X_test)
     predictions = scaler.inverse_transform(predictions)
@@ -96,13 +93,12 @@ except Exception as e:
 # Menampilkan hasil prediksi
 st.subheader('Prediksi vs Harga Aktual')
 
-# Pastikan panjang data untuk plot sama
 actual_dates = btc_data.index[y_test_start_index:]
 if len(actual_dates) != len(predictions):
     st.warning("Terjadi ketidakcocokan panjang data antara prediksi dan data aktual.")
 else:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=actual_dates, y=y_test, mode='lines', name='Harga Aktual', line=dict(color='blue')))
+    fig.add_trace(go.Scatter(x=actual_dates, y=y_test.flatten(), mode='lines', name='Harga Aktual', line=dict(color='blue')))
     fig.add_trace(go.Scatter(x=actual_dates, y=predictions.flatten(), mode='lines', name='Harga Prediksi', line=dict(color='red')))
 
     fig.update_layout(
